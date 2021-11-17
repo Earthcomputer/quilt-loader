@@ -29,9 +29,7 @@ import java.util.Collection;
  * such as {@code "mypackage.MyClass$Inner"}.</p>
  *
  * @since 0.4.1
- * @deprecated Please migrate to the quilt version {@link org.quiltmc.loader.api.MappingResolver}
  */
-@Deprecated
 public interface MappingResolver {
 	/**
 	 * Get the list of all available mapping namespaces in the loaded instance.

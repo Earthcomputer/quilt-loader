@@ -16,28 +16,82 @@
 
 package net.fabricmc.loader.api;
 
-import net.fabricmc.loader.api.metadata.ModMetadata;
-import org.quiltmc.loader.impl.util.version.VersionDeserializer;
+import net.fabricmc.loader.api.SemanticVersion;
+import net.fabricmc.loader.api.VersionParsingException;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
+import net.fabricmc.loader.impl.metadata.qmj.GenericVersionImpl;
+import net.fabricmc.loader.impl.metadata.qmj.SemanticVersionImpl;
+import net.fabricmc.loader.impl.util.version.FabricSemanticVersionImpl;
 
 /**
- * Represents a version of a mod.
- * 
- * @see ModMetadata#getVersion() 
+ * Representation of a version.
  */
+@ApiStatus.NonExtendable
 public interface Version {
-	/**
-	 * Returns the user-friendly representation of this version.
-	 */
-	String getFriendlyString();
+	static Version of(String raw) {
+		try {
+			return Semantic.of(raw);
+		} catch (VersionFormatException ex) {
+			try {
+				// this will be removed when we remove fabric support from quilt-loader
+				return new FabricSemanticVersionImpl(raw, false);
+			} catch (VersionParsingException e) {
+				return new GenericVersionImpl(raw);
+			}
+		}
+	}
 
+	String raw();
+
+	default boolean isSemantic() {
+		return this instanceof Version.Semantic;
+	}
+
+	default Semantic semantic() {
+		return (Semantic) this;
+	}
 	/**
-	 * Parses a version from a string notation.
-	 * 
-	 * @param string the string notation of the version
-	 * @return the parsed version
-	 * @throws VersionParsingException if a problem arises during version parsing
+	 * Representation of a semantic version
 	 */
-	static Version parse(String string) throws VersionParsingException {
-		return VersionDeserializer.deserialize(string);
+	@ApiStatus.NonExtendable
+	interface Semantic extends Version, Comparable<Semantic> {
+		static Semantic of(String raw) throws VersionFormatException {
+			return SemanticVersionImpl.of(raw);
+		}
+
+		static Semantic of(int major, int minor, int patch, String preRelease, String buildMetadata) throws VersionFormatException {
+			return SemanticVersionImpl.of(major, minor, patch, preRelease, buildMetadata);
+		}
+
+		// TODO: maybe allow returning negative when ${version} is provided?
+		/**
+		 * Must be a positive integer.
+		 */
+		int major();
+
+		/**
+		 * Must be a positive integer.
+		 */
+		int minor();
+
+		/**
+		 * Must be a positive integer.
+		 */
+		int patch();
+
+		/**
+		 * Returns an empty string if not applicable
+		 */
+		String preRelease();
+
+		/**
+		 * Returns an empty string if not applicable
+		 */
+		String buildMetadata();
+
+		// TODO: docs
+		@Override
+		int compareTo(@NotNull Version.Semantic o);
 	}
 }

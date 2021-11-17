@@ -20,10 +20,8 @@ package net.fabricmc.loader.api;
  * An exception that occurs during a {@link LanguageAdapter}'s object creation.
  *
  * @see LanguageAdapter
- * @deprecated Only thrown by fabric's {@link LanguageAdapter}, not quilt's.
  */
 @SuppressWarnings("serial")
-@Deprecated
 public class LanguageAdapterException extends Exception {
 	/**
 	 * Creates a new language adapter exception.
