@@ -16,11 +16,9 @@
 
 package net.fabricmc.loader.api;
 
-import java.util.Enumeration;
 import java.util.Optional;
-import java.util.StringTokenizer;
 
-import net.fabricmc.loader.util.version.VersionDeserializer;
+import net.fabricmc.loader.impl.util.version.VersionParser;
 
 /**
  * Represents a <a href="https://semver.org/">Sematic Version</a>.
@@ -30,7 +28,7 @@ import net.fabricmc.loader.util.version.VersionDeserializer;
  *
  * @see Version
  */
-public interface SemanticVersion extends Version, Comparable<SemanticVersion> {
+public interface SemanticVersion extends Version {
 	/**
 	 * The value of {@linkplain #getVersionComponent(int) version component} that indicates
 	 * a {@linkplain #hasWildcard() wildcard}.
@@ -48,7 +46,7 @@ public interface SemanticVersion extends Version, Comparable<SemanticVersion> {
 
 	/**
 	 * Returns the version component at {@code pos}.
-	 * 
+	 *
 	 * <p>May return {@link #COMPONENT_WILDCARD} to indicate a wildcard component.</p>
 	 *
 	 * <p>If the pos exceeds the number of components, returns {@link #COMPONENT_WILDCARD}
@@ -61,19 +59,19 @@ public interface SemanticVersion extends Version, Comparable<SemanticVersion> {
 
 	/**
 	 * Returns the prerelease key in the version notation.
-	 * 
+	 *
 	 * <p>The prerelease key is indicated by a {@code -} before a {@code +} in
 	 * the version notation.</p>
-	 * 
+	 *
 	 * @return the optional prerelease key
 	 */
 	Optional<String> getPrereleaseKey();
 
 	/**
 	 * Returns the build key in the version notation.
-	 * 
+	 *
 	 * <p>The build key is indicated by a {@code +} in the version notation.</p>
-	 * 
+	 *
 	 * @return the optional build key
 	 */
 	Optional<String> getBuildKey();
@@ -89,16 +87,12 @@ public interface SemanticVersion extends Version, Comparable<SemanticVersion> {
 	boolean hasWildcard();
 
 	/**
-	 * {@inheritDoc}
-	 * 
-	 * <p>Comparison of semantic versions is by the version components, from high to low;
-	 * then it falls back to comparing the prerelease notations.</p>
-	 *
-	 * @param o the other version
-	 * @return the result of comparison
+	 * @deprecated Use {@link #compareTo(Version)} instead
 	 */
-	@Override
-	int compareTo(SemanticVersion o);
+	@Deprecated
+	default int compareTo(SemanticVersion o) {
+		return compareTo((Version) o);
+	}
 
 	/**
 	 * Parses a semantic version from a string notation.
@@ -108,6 +102,6 @@ public interface SemanticVersion extends Version, Comparable<SemanticVersion> {
 	 * @throws VersionParsingException if a problem arises during version parsing
 	 */
 	static SemanticVersion parse(String s) throws VersionParsingException {
-		return VersionDeserializer.deserializeSemantic(s);
+		return VersionParser.parseSemantic(s);
 	}
 }

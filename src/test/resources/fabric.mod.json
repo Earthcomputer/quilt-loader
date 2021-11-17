@@ -4,18 +4,17 @@
   "name": "Test Mod",
   "version": "1.0.0",
   "side": "client",
-  "mixins": [
-    {
-      "config": "fabricmc.test.mixins.client.json",
-      "environment": "client"
-    }
-  ],
   "entrypoints": {
     "preLaunch": [
       "net.fabricmc.test.TestMod"
     ],
     "main": [
       "net.fabricmc.test.TestMod"
+    ],
+    "test:testing": [
+      "net.fabricmc.test.EntrypointTest::instanceEntry",
+      "net.fabricmc.test.EntrypointTest::staticEntry",
+      "net.fabricmc.test.EntrypointTest::FIELD_ENTRY"
     ]
   }
 }

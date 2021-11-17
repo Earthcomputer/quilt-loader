@@ -1,70 +1,83 @@
-plugins {
-	id 'java'
-	id 'idea'
-	id 'eclipse'
-	id 'maven-publish'
-	id("org.cadixdev.licenser") version "0.5.0"
-	id("fabric-loom") version "0.5-SNAPSHOT"
+buildscript {
+	dependencies {
+		classpath 'org.kohsuke:github-api:1.114'
+		classpath 'com.guardsquare:proguard-gradle:' + (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_11) ? '7.2.0-beta2' : '7.1.0')
+	}
 }
 
-sourceCompatibility = 1.8
-targetCompatibility = 1.8
+plugins {
+	id 'java'
+	id 'java-library'
+	id 'eclipse'
+	id 'maven-publish'
+	id 'checkstyle'
+	id 'org.cadixdev.licenser' version '0.6.1'
+	id 'fabric-loom' version '0.9-SNAPSHOT' apply false
+	id 'com.github.johnrengelman.shadow' version '7.0.0'
+}
+
+sourceCompatibility = JavaVersion.VERSION_1_8
+targetCompatibility = JavaVersion.VERSION_1_8
 
 archivesBaseName = "fabric-loader"
 
 // Fetch build number from Jenkins
 def ENV = System.getenv()
-version = version + (ENV.GITHUB_ACTIONS ? "" : "+local")
 
-repositories {
-	mavenCentral()
-	jcenter()
-	maven {
-		name = 'Fabric'
-		url = 'https://maven.fabricmc.net/'
+allprojects {
+	apply plugin: 'java-library'
+	apply plugin: 'eclipse'
+	apply plugin: 'checkstyle'
+
+	version = version + (ENV.GITHUB_ACTIONS ? "" : "+local")
+
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+		maven {
+			name = 'mojang'
+			url = 'https://libraries.minecraft.net/'
+		}
 	}
-	maven {
-		name = 'mojang'
-		url = 'https://libraries.minecraft.net/'
+}
+
+sourceSets {
+	main {
+		java.srcDirs = ['src/main/java', 'src/main/legacyJava']
+	}
+}
+
+configurations {
+	include
+
+	implementation {
+		extendsFrom include
 	}
 }
 
 dependencies {
-	minecraft "com.mojang:minecraft:1.16.4"
-	mappings "net.fabricmc:yarn:1.16.4+build.9:v2"
-
 	// fabric-loader dependencies
-	implementation "org.ow2.asm:asm:${project.asm_version}"
-	implementation "org.ow2.asm:asm-analysis:${project.asm_version}"
-	implementation "org.ow2.asm:asm-commons:${project.asm_version}"
-	implementation "org.ow2.asm:asm-tree:${project.asm_version}"
-	implementation "org.ow2.asm:asm-util:${project.asm_version}"
+	api "org.ow2.asm:asm:${project.asm_version}"
+	api "org.ow2.asm:asm-analysis:${project.asm_version}"
+	api "org.ow2.asm:asm-commons:${project.asm_version}"
+	api "org.ow2.asm:asm-tree:${project.asm_version}"
+	api "org.ow2.asm:asm-util:${project.asm_version}"
 
-	// Required for mixin annotation processor
-	annotationProcessor "org.ow2.asm:asm:${project.asm_version}"
-	annotationProcessor "org.ow2.asm:asm-analysis:${project.asm_version}"
-	annotationProcessor "org.ow2.asm:asm-commons:${project.asm_version}"
-	annotationProcessor "org.ow2.asm:asm-tree:${project.asm_version}"
-	annotationProcessor "org.ow2.asm:asm-util:${project.asm_version}"
-
-	implementation('net.fabricmc:sponge-mixin:0.9.2+mixin.0.8.2') {
+	api('net.fabricmc:sponge-mixin:0.10.6+mixin.0.8.4') {
 		exclude module: 'launchwrapper'
 		exclude module: 'guava'
 	}
-	implementation 'net.fabricmc:tiny-mappings-parser:0.2.2.14'
-	implementation 'net.fabricmc:tiny-remapper:0.3.0.70'
-	implementation 'net.fabricmc:access-widener:1.0.0'
+	api 'net.fabricmc:tiny-mappings-parser:0.3.0+build.17'
+	api 'net.fabricmc:tiny-remapper:0.6.0'
+	api 'net.fabricmc:access-widener:2.0.1'
 
-	implementation 'com.google.jimfs:jimfs:1.2-fabric'
-	implementation 'net.fabricmc:fabric-loader-sat4j:2.3.5.4'
+	include 'org.ow2.sat4j:org.ow2.sat4j.core:2.3.6'
+	include 'org.ow2.sat4j:org.ow2.sat4j.pb:2.3.6'
 
-	// launchwrapper + dependencies
-	implementation ('net.minecraft:launchwrapper:1.12') {
-		transitive = false
-	}
-	implementation 'net.sf.jopt-simple:jopt-simple:5.0.3'
-
-	testCompileOnly 'org.jetbrains:annotations:19.0.0'
+	testCompileOnly 'org.jetbrains:annotations:21.0.1'
 
 	// Unit testing for mod metadata
 	testImplementation('org.junit.jupiter:junit-jupiter:5.6.2')
@@ -79,40 +92,123 @@ processResources {
 }
 
 java {
-	// Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-	// if it is present.
-	// If you remove this task, sources will not be generated.
 	withSourcesJar()
 }
 
 jar {
-	manifest {
-		attributes (
-			'Main-Class': 'net.fabricmc.loader.launch.server.FabricServerLauncher'
-		)
+	enabled = false
+	// Set the classifier to fix gradle task validation confusion.
+	archiveClassifier = "disabled"
+}
+
+shadowJar {
+	// Has stupid defaults, make our own
+	enabled = false
+}
+
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
+// Renaming in the shadow jar task doesnt seem to work, so do it here
+task getSat4jAbout(type: Copy) {
+	dependsOn project.configurations.include
+	duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+	from {
+		configurations.include.collect {
+			zipTree(it).matching {
+				include 'about.html'
+			}
+		}
 	}
 
+	rename 'about.html', 'net/fabricmc/loader/impl/lib/sat4j/about-sat4j.html'
+
+	into layout.buildDirectory.dir("sat4j")
+}
+
+task fatJar(type: ShadowJar, dependsOn: getSat4jAbout) {
+	from sourceSets.main.output
+	from project(":minecraft").sourceSets.main.output
+	from getSat4jAbout.destinationDir
 	from("LICENSE") {
 		rename { "${it}_${project.archivesBaseName}"}
 	}
+
+	manifest {
+		attributes (
+			'Main-Class': 'net.fabricmc.loader.impl.launch.server.FabricServerLauncher'
+		)
+	}
+
+	archiveClassifier = "fat"
+	configurations = [project.configurations.include]
+
+	relocate 'org.sat4j', 'net.fabricmc.loader.impl.lib.sat4j'
+
+	exclude 'about.html'
+	exclude 'sat4j.version'
+	exclude 'META-INF/maven/org.ow2.sat4j/*/**'
+
+	outputs.upToDateWhen { false }
 }
 
-task copyJson(type: Copy, dependsOn: ["remapJar"]) {
-	from('src/main/resources/fabric-installer.json') {
-		rename { "${archivesBaseName}-${version}.json" }
+File proguardFile = file("build/libs/fabric-loader-${version}.jar")
+
+import proguard.gradle.ProGuardTask
+task proguardJar(type: ProGuardTask, dependsOn: fatJar) {
+	def classpath = project(":minecraft").configurations.compileClasspath
+
+	inputs.files(fatJar, classpath)
+	outputs.files(proguardFile)
+	outputs.upToDateWhen { false }
+
+	doFirst {
+		classpath.resolve().forEach {
+			libraryjars it
+		}
 	}
-	into 'build/libs'
+
+	libraryjars JavaVersion.current().java9Compatible ? "${System.getProperty('java.home')}/jmods" : "${System.getProperty('java.home')}/lib/rt.jar"
+
+	injars fatJar.archiveFile
+	outjars proguardFile
+	configuration file("proguard.conf")
+}
+build.dependsOn proguardJar
+
+tasks.withType(AbstractArchiveTask) {
+	preserveFileTimestamps = false
+	reproducibleFileOrder = true
 }
 
-task copyJsonLw(type: Copy, dependsOn: ["remapJar"]) {
-	from('src/main/resources/fabric-installer.launchwrapper.json') {
-		rename { "${archivesBaseName}-${version}.launchwrapper.json" }
+sourcesJar {
+	from sourceSets.main.allSource
+	from project(":minecraft").sourceSets.main.allSource
+}
+
+// useful for creating test mod jar
+task testJar(type: Jar) {
+	archiveClassifier = "test"
+	from sourceSets.test.output
+}
+
+task copyJson() {
+	def inJson = file('src/main/resources/fabric-installer.json')
+	def inLwJson = file('src/main/resources/fabric-installer.launchwrapper.json')
+
+	def outJson = file("build/libs/${archivesBaseName}-${version}.json")
+	def outLwJson = file("build/libs/${archivesBaseName}-${version}.launchwrapper.json")
+
+	inputs.files (inJson, inLwJson)
+	outputs.files(outJson, outLwJson)
+
+	doLast {
+		outJson.text = inJson.text
+		outLwJson.text = inLwJson.text
 	}
-	into 'build/libs'
 }
 
 tasks.build.dependsOn "copyJson"
-tasks.build.dependsOn "copyJsonLw"
 
 tasks.withType(JavaCompile).configureEach {
 	it.options.encoding = "UTF-8"
@@ -152,35 +248,45 @@ javadoc {
 task javadocJar(type: Jar) {
 	dependsOn javadoc
 	from javadoc.destinationDir
-	classifier = 'javadoc'
+	archiveClassifier = 'javadoc'
 }
 
 build.dependsOn javadocJar
 
-license {
-	header file("HEADER")
-	include '**/*.java'
+allprojects {
+	checkstyle {
+		configFile = project.rootProject.file("checkstyle.xml")
+		toolVersion = '8.44'
+	}
 
-	// Exclude gson since it is google's code, we just modify and bundle it
-	exclude '**/lib/gson/*.java'
+	license {
+		header project.rootProject.file("HEADER")
+		include '**/*.java'
+
+		// Exclude gson since it is google's code, we just modify and bundle it
+		exclude '**/lib/gson/*.java'
+	}
+}
+
+// Causes more trouble than its worth
+tasks.withType(GenerateModuleMetadata) {
+	enabled = false
 }
 
 publishing {
 	publications {
 		mavenJava(MavenPublication) {
 			// add all the jars that should be included when publishing to maven
-			artifact(file("${project.buildDir}/libs/$archivesBaseName-${version}.jar")) {
-				builtBy remapJar
+			artifact(proguardFile) {
+				builtBy proguardJar
 			}
-			artifact(sourcesJar) {
-				builtBy remapSourcesJar
-			}
+			artifact(sourcesJar)
 			artifact javadocJar
 			artifact(file('src/main/resources/fabric-installer.json')) {
-				builtBy remapJar
+				builtBy copyJson
 			}
 			artifact(file('src/main/resources/fabric-installer.launchwrapper.json')) {
-				builtBy remapJar
+				builtBy copyJson
 				classifier = "launchwrapper"
 			}
 		}
@@ -200,6 +306,38 @@ publishing {
 	}
 }
 
+def getBranch() {
+	def ENV = System.getenv()
+	if (ENV.GITHUB_REF) {
+		def branch = ENV.GITHUB_REF
+		return branch.substring(branch.lastIndexOf("/") + 1)
+	}
+
+	return "unknown"
+}
+
+import org.kohsuke.github.GHReleaseBuilder
+import org.kohsuke.github.GitHub
+
+task github(dependsOn: publish) {
+	onlyIf {
+		ENV.GITHUB_TOKEN
+	}
+
+	doLast {
+		def github = GitHub.connectUsingOAuth(ENV.GITHUB_TOKEN as String)
+		def repository = github.getRepository(ENV.GITHUB_REPOSITORY)
+
+		def releaseBuilder = new GHReleaseBuilder(repository, version as String)
+		releaseBuilder.name("Fabric Loader $version")
+		releaseBuilder.body(ENV.CHANGELOG ?: "No changelog provided")
+		releaseBuilder.commitish(getBranch())
+		releaseBuilder.prerelease(false)
+
+		releaseBuilder.create()
+	}
+}
+
 // A task to ensure that the version being released has not already been released.
 task checkVersion {
 	doFirst {
@@ -213,3 +351,4 @@ task checkVersion {
 }
 
 publish.mustRunAfter checkVersion
+github.mustRunAfter checkVersion
