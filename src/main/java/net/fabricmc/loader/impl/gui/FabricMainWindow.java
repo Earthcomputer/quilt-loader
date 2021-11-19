@@ -25,12 +25,16 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
 import java.awt.HeadlessException;
+import java.awt.Image;
+import java.awt.Toolkit;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Enumeration;
@@ -64,6 +68,11 @@ import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricStatusButton;
 import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricStatusNode;
 import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricStatusTab;
 import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricTreeWarningLevel;
+import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricBasicButtonType;
+import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricStatusButton;
+import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricStatusNode;
+import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricStatusTab;
+import net.fabricmc.loader.impl.gui.FabricStatusTree.FabricTreeWarningLevel;
 
 class FabricMainWindow {
 	static Icon missingIcon = null;
@@ -72,6 +81,10 @@ class FabricMainWindow {
 		if (GraphicsEnvironment.isHeadless()) {
 			throw new HeadlessException();
 		}
+
+		// Set MacOS specific system props
+		System.setProperty("apple.awt.application.appearance", "system");
+		System.setProperty("apple.awt.application.name", tree.title);
 
 		UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
 		open0(tree, shouldWait);
@@ -92,13 +105,15 @@ class FabricMainWindow {
 	private static void createUi(CountDownLatch onCloseLatch, FabricStatusTree tree) {
 		JFrame window = new JFrame();
 		window.setVisible(false);
-		window.setTitle("Fabric Loader");
+		window.setTitle(tree.title);
 
 		try {
 			List<BufferedImage> images = new ArrayList<BufferedImage>();
 			images.add(loadImage("/ui/icon/quilt_x16.png"));
-			images.add(loadImage("/ui/icon/quilt_x128.png"));
+			BufferedImage biggerImage = loadImage("/ui/icon/quilt_x128.png");
+			images.add(biggerImage);
 			window.setIconImages(images);
+			setTaskBarImage(biggerImage);
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
@@ -149,8 +164,17 @@ class FabricMainWindow {
 			for (FabricStatusButton button : tree.buttons) {
 				JButton btn = new JButton(button.text);
 				buttons.add(btn);
-				btn.addActionListener(e -> {
-					btn.setEnabled(false);
+				btn.addActionListener(event -> {
+					if (button.type == FabricBasicButtonType.CLICK_ONCE) btn.setEnabled(false);
+
+					if (button.clipboard != null) {
+						try {
+							StringSelection clipboard = new StringSelection(button.clipboard);
+							Toolkit.getDefaultToolkit().getSystemClipboard().setContents(clipboard, clipboard);
+						} catch (IllegalStateException e) {
+							//Clipboard unavailable?
+						}
+					}
 
 					if (button.shouldClose) {
 						window.dispose();
@@ -177,6 +201,7 @@ class FabricMainWindow {
 		DefaultTreeModel model = new DefaultTreeModel(treeNode);
 		JTree tree = new JTree(model);
 		tree.setRootVisible(false);
+		tree.setRowHeight(0); // Allow rows to be multiple lines tall
 
 		for (int row = 0; row < tree.getRowCount(); row++) {
 			if (!tree.isVisible(tree.getPathForRow(row))) {
@@ -185,7 +210,7 @@ class FabricMainWindow {
 
 			CustomTreeNode node = ((CustomTreeNode) tree.getPathForRow(row).getLastPathComponent());
 
-			if (node.node.expandByDefault || node.node.getMaximumWarningLevel().isAtLeast(FabricTreeWarningLevel.WARN)) {
+			if (node.node.expandByDefault) {
 				tree.expandRow(row);
 			}
 		}
@@ -211,6 +236,19 @@ class FabricMainWindow {
 		}
 
 		return stream;
+	}
+
+	private static void setTaskBarImage(Image image) {
+		try {
+			// TODO Remove reflection when updating past Java 8
+			Class<?> taskbarClass = Class.forName("java.awt.Taskbar");
+			Method getTaskbar = taskbarClass.getDeclaredMethod("getTaskbar");
+			Method setIconImage = taskbarClass.getDeclaredMethod("setIconImage", Image.class);
+			Object taskbar = getTaskbar.invoke(null);
+			setIconImage.invoke(taskbar, image);
+		} catch (Exception e) {
+			// Ignored
+		}
 	}
 
 	static final class IconSet {
@@ -304,13 +342,13 @@ class FabricMainWindow {
 		public final String[] decor;
 		private final int hash;
 
-		public IconInfo(String mainPath) {
+		IconInfo(String mainPath) {
 			this.mainPath = mainPath;
 			this.decor = new String[0];
 			hash = mainPath.hashCode();
 		}
 
-		public IconInfo(String mainPath, String[] decor) {
+		IconInfo(String mainPath, String[] decor) {
 			this.mainPath = mainPath;
 			this.decor = decor;
 			assert decor.length < 4 : "Cannot fit more than 3 decorations into an image (and leave space for the background)";
@@ -386,12 +424,12 @@ class FabricMainWindow {
 
 		private CustomTreeCellRenderer(IconSet icons) {
 			this.iconSet = icons;
+			//setVerticalTextPosition(TOP); // Move icons to top rather than centre
 		}
 
 		@Override
 		public Component getTreeCellRendererComponent(JTree tree, Object value, boolean sel, boolean expanded,
-			boolean leaf, int row, boolean hasFocus) {
-
+				boolean leaf, int row, boolean hasFocus) {
 			super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
 
 			if (value instanceof CustomTreeNode) {
@@ -404,10 +442,10 @@ class FabricMainWindow {
 					if (c.node.details.contains("\n")) {
 						// It's a bit odd but it's easier than creating a custom tooltip
 						String replaced = c.node.details//
-							.replace("&", "&amp;")//
-							.replace("<", "&lt;")//
-							.replace(">", "&gt;")//
-							.replace("\n", "<br>");
+								.replace("&", "&amp;")//
+								.replace("<", "&lt;")//
+								.replace(">", "&gt;")//
+								.replace("\n", "<br>");
 						setToolTipText("<html>" + replaced + "</html>");
 					} else {
 						setToolTipText(c.node.details);
@@ -425,7 +463,7 @@ class FabricMainWindow {
 		public final List<CustomTreeNode> displayedChildren = new ArrayList<>();
 		private IconInfo iconInfo;
 
-		public CustomTreeNode(TreeNode parent, FabricStatusNode node, FabricTreeWarningLevel minimumWarningLevel) {
+		CustomTreeNode(TreeNode parent, FabricStatusNode node, FabricTreeWarningLevel minimumWarningLevel) {
 			this.parent = parent;
 			this.node = node;
 
@@ -482,7 +520,7 @@ class FabricMainWindow {
 		}
 
 		@Override
-		public Enumeration<? extends TreeNode> children() {
+		public Enumeration<CustomTreeNode> children() {
 			return new Enumeration<CustomTreeNode>() {
 				Iterator<CustomTreeNode> it = displayedChildren.iterator();
 

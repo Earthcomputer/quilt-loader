@@ -17,20 +17,23 @@
 package net.fabricmc.loader.impl.util;
 
 import java.io.File;
-import java.net.*;
+import java.net.JarURLConnection;
+import java.net.MalformedURLException;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.net.URLConnection;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 public final class UrlUtil {
-	private UrlUtil() {
-
-	}
+	private UrlUtil() { }
 
 	public static URL getSource(String filename, URL resourceURL) throws UrlConversionException {
 		URL codeSourceURL;
 
 		try {
 			URLConnection connection = resourceURL.openConnection();
+
 			if (connection instanceof JarURLConnection) {
 				codeSourceURL = ((JarURLConnection) connection).getJarFileURL();
 			} else {
@@ -49,40 +52,23 @@ public final class UrlUtil {
 		return codeSourceURL;
 	}
 
-	public static File asFile(URL url) throws UrlConversionException {
+	public static Path getSourcePath(String filename, URL resourceURL) throws UrlConversionException {
 		try {
-			return new File(url.toURI());
+			return asPath(getSource(filename, resourceURL));
 		} catch (URISyntaxException e) {
 			throw new UrlConversionException(e);
 		}
 	}
 
-	public static Path asPath(URL url) throws UrlConversionException {
-		if (url.getProtocol().equals("file")) {
-			// TODO: Is this required?
-			return asFile(url).toPath();
-		} else {
-			try {
-				return Paths.get(url.toURI());
-			} catch (URISyntaxException e) {
-				throw new UrlConversionException(e);
-			}
-		}
+	public static Path asPath(URL url) throws URISyntaxException {
+		return Paths.get(url.toURI());
 	}
 
-	public static URL asUrl(File file) throws UrlConversionException {
-		try {
-			return file.toURI().toURL();
-		} catch (MalformedURLException e) {
-			throw new UrlConversionException(e);
-		}
+	public static URL asUrl(File file) throws MalformedURLException {
+		return file.toURI().toURL();
 	}
 
-	public static URL asUrl(Path path) throws UrlConversionException {
-		try {
-			return new URL(null, path.toUri().toString());
-		} catch (MalformedURLException e) {
-			throw new UrlConversionException(e);
-		}
+	public static URL asUrl(Path path) throws MalformedURLException {
+		return path.toUri().toURL();
 	}
 }

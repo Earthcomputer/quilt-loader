@@ -23,6 +23,7 @@ import java.util.Optional;
 
 import org.jetbrains.annotations.Nullable;
 import net.fabricmc.loader.api.entrypoint.EntrypointContainer;
+import net.fabricmc.loader.impl.FabricLoaderImpl;
 import net.fabricmc.loader.api.entrypoint.EntrypointException;
 import net.fabricmc.loader.impl.FabricLoaderImpl;
 
@@ -90,6 +91,24 @@ public final class FabricLoader {
 	public static <T> List<EntrypointContainer<T>> getEntrypointContainers(String key, Class<T> type) throws EntrypointException {
 		return impl().getEntrypointContainers(key, type);
 	}
+
+	/**
+	 * Get the object share for inter-mod communication.
+	 *
+	 * <p>The share allows mods to exchange data without directly referencing each other. This makes simple interaction
+	 * easier by eliminating any compile- or run-time dependencies if the shared value type is independent of the mod
+	 * (only Java/game/Fabric types like collections, primitives, String, Consumer, Function, ...).
+	 *
+	 * <p>Active interaction is possible as well since the shared values can be arbitrary Java objects. For example
+	 * exposing a {@code Runnable} or {@code Function} allows the "API" user to directly invoke some program logic.
+	 *
+	 * <p>It is required to prefix the share key with the mod id like {@code mymod:someProperty}. Mods should not
+	 * modify entries by other mods. The share is thread safe.
+	 *
+	 * @return the global object share instance
+	 * @since 0.12.0
+	 */
+	ObjectShare getObjectShare();
 
 	/**
 	 * Get the current mapping resolver.

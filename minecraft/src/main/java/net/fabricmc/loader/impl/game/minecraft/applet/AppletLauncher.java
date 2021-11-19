@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 
-package net.fabricmc.loader.impl.entrypoint.applet;
-
-import net.fabricmc.loader.impl.entrypoint.EntrypointTransformer;
-import net.fabricmc.loader.impl.launch.common.FabricLauncherBase;
+package net.fabricmc.loader.impl.game.minecraft.applet;
 
 import java.applet.Applet;
 import java.applet.AppletStub;
@@ -30,13 +27,16 @@ import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 
+import net.fabricmc.loader.impl.game.minecraft.Hooks;
+import net.fabricmc.loader.impl.launch.FabricLauncherBase;
+
 /**
  * PLEASE NOTE:
  *
- * This class is originally copyrighted under Apache License 2.0
+ * <p>This class is originally copyrighted under Apache License 2.0
  * by the MCUpdater project (https://github.com/MCUpdater/MCU-Launcher/).
  *
- * It has been adapted here for the purposes of the Fabric loader.
+ * <p>It has been adapted here for the purposes of the Fabric loader.
  */
 @SuppressWarnings("serial")
 public class AppletLauncher extends Applet implements AppletStub {
@@ -53,16 +53,22 @@ public class AppletLauncher extends Applet implements AppletStub {
 		params.put("username", username);
 		params.put("sessionid", sessionid);
 		params.put("stand-alone", "true");
+
 		if (doConnect) {
 			params.put("server", host);
 			params.put("port", port);
 		}
+
 		params.put("fullscreen", Boolean.toString(fullscreen)); //Required param for vanilla. Forge handles the absence gracefully.
 		params.put("demo", Boolean.toString(demo));
 
 		try {
-			mcApplet = (Applet) FabricLauncherBase.getLauncher().getTargetClassLoader().loadClass(EntrypointTransformer.appletMainClass)
-				.getDeclaredConstructor().newInstance();
+			mcApplet = (Applet) FabricLauncherBase.getLauncher()
+					.getTargetClassLoader()
+					.loadClass(Hooks.appletMainClass)
+					.getDeclaredConstructor()
+					.newInstance();
+
 			//noinspection ConstantConditions
 			if (mcApplet == null) {
 				throw new RuntimeException("Could not instantiate MinecraftApplet - is null?");
@@ -82,6 +88,7 @@ public class AppletLauncher extends Applet implements AppletStub {
 	public void replace(Applet applet) {
 		this.mcApplet = applet;
 		init();
+
 		if (active) {
 			start();
 			validate();
@@ -106,12 +113,14 @@ public class AppletLauncher extends Applet implements AppletStub {
 	@Override
 	public String getParameter(String name) {
 		String value = params.get(name);
-		if (value != null) {
-			return value;
-		}
+		if (value != null) return value;
+
 		try {
 			return super.getParameter(name);
-		} catch (Exception ignored) {}
+		} catch (Exception ignored) {
+			// ignored
+		}
+
 		return null;
 	}
 
@@ -123,8 +132,8 @@ public class AppletLauncher extends Applet implements AppletStub {
 	@Override
 	public void init() {
 		mcApplet.setStub(this);
-		mcApplet.setSize(getWidth(),getHeight());
-		this.setLayout(new BorderLayout());
+		mcApplet.setSize(getWidth(), getHeight());
+		setLayout(new BorderLayout());
 		this.add(mcApplet, "Center");
 		mcApplet.init();
 	}
@@ -146,7 +155,7 @@ public class AppletLauncher extends Applet implements AppletStub {
 	 * the applet hosting location, as an anti-rehosting measure. Of course,
 	 * being ran stand-alone, it's not actually "hosted" anywhere.
 	 *
-	 * The side effect of not providing the correct URL here is all levels,
+	 * <p>The side effect of not providing the correct URL here is all levels,
 	 * loaded or generated, being set to null.
 	 */
 	private URL getMinecraftHostingUrl() {
@@ -155,6 +164,7 @@ public class AppletLauncher extends Applet implements AppletStub {
 		} catch (MalformedURLException e) {
 			e.printStackTrace();
 		}
+
 		return null;
 	}
 

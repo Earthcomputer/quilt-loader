@@ -23,8 +23,8 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Map.Entry;
+import java.util.Objects;
 
 import net.fabricmc.loader.api.metadata.CustomValue;
 import net.fabricmc.json5.JsonReader;
@@ -128,7 +128,7 @@ public abstract class CustomValueImpl implements CustomValue {
 	public static final class ObjectImpl extends CustomValueImpl implements CvObject {
 		private final Map<String, CustomValue> entries;
 
-		public ObjectImpl(Map<String, CustomValue> entries) {
+		ObjectImpl(Map<String, CustomValue> entries) {
 			this.entries = Collections.unmodifiableMap(entries);
 		}
 
@@ -161,7 +161,7 @@ public abstract class CustomValueImpl implements CustomValue {
 	public static final class ArrayImpl extends CustomValueImpl implements CvArray {
 		private final List<CustomValue> entries;
 
-		public ArrayImpl(List<CustomValue> entries) {
+		ArrayImpl(List<CustomValue> entries) {
 			this.entries = Collections.unmodifiableList(entries);
 		}
 
@@ -189,7 +189,7 @@ public abstract class CustomValueImpl implements CustomValue {
 	public static final class StringImpl extends CustomValueImpl {
 		final String value;
 
-		public StringImpl(String value) {
+		StringImpl(String value) {
 			this.value = value;
 		}
 
@@ -202,7 +202,7 @@ public abstract class CustomValueImpl implements CustomValue {
 	public static final class NumberImpl extends CustomValueImpl {
 		final Number value;
 
-		public NumberImpl(Number value) {
+		NumberImpl(Number value) {
 			this.value = value;
 		}
 
@@ -215,7 +215,7 @@ public abstract class CustomValueImpl implements CustomValue {
 	public static final class BooleanImpl extends CustomValueImpl {
 		final boolean value;
 
-		public BooleanImpl(boolean value) {
+		BooleanImpl(boolean value) {
 			this.value = value;
 		}
 

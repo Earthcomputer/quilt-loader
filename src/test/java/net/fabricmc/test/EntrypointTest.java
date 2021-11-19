@@ -14,26 +14,27 @@
  * limitations under the License.
  */
 
-package net.fabricmc.loader.impl.entrypoint.applet;
+package net.fabricmc.test;
 
-import java.io.File;
+import net.fabricmc.loader.impl.util.log.Log;
+import net.fabricmc.loader.impl.util.log.LogCategory;
 
-public final class AppletMain {
-	private AppletMain() {
+public final class EntrypointTest {
+	public static final CustomEntry FIELD_ENTRY = EntrypointTest::fieldEntry;
 
+	public static String staticEntry() {
+		return "static";
 	}
 
-	public static File hookGameDir(File file) {
-		File proposed = AppletLauncher.gameDir;
-		if (proposed != null) {
-			return proposed;
-		} else {
-			return file;
-		}
+	public EntrypointTest() {
+		Log.info(LogCategory.TEST, "EntrypointTest instance created");
 	}
 
-	public static void main(String[] args) {
-		AppletFrame me = new AppletFrame("Minecraft", null);
-		me.launch(args);
+	public String instanceEntry() {
+		return "instance";
+	}
+
+	public static String fieldEntry() {
+		return "field";
 	}
 }

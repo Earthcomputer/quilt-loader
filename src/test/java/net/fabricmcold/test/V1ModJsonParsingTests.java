@@ -23,11 +23,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.Map;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,7 +40,6 @@ import org.quiltmc.loader.impl.metadata.FabricModMetadataReader;
 import org.quiltmc.loader.impl.metadata.ParseMetadataException;
 
 final class V1ModJsonParsingTests {
-	private static final Logger LOGGER = LogManager.getLogger();
 	private static Path testLocation;
 	private static Path specPath;
 	private static Path errorPath;
@@ -69,12 +69,12 @@ final class V1ModJsonParsingTests {
 		// Required fields
 		final LoaderModMetadata metadata = FabricModMetadataReader.parseMetadata(LOGGER, specPath.resolve("required.json"));
 		assertNotNull(metadata, "Failed to read mod metadata!");
-		this.validateRequiredValues(metadata);
+		validateRequiredValues(metadata);
 
 		// Required fields in different order to verify we don't have ordering issues
 		final LoaderModMetadata reversedMetadata = FabricModMetadataReader.parseMetadata(LOGGER, specPath.resolve("required_reversed.json"));
 		assertNotNull(reversedMetadata, "Failed to read mod metadata!");
-		this.validateRequiredValues(reversedMetadata);
+		validateRequiredValues(reversedMetadata);
 	}
 
 	@Test
@@ -150,7 +150,7 @@ final class V1ModJsonParsingTests {
 			throw new RuntimeException("Incorrect access widener entry");
 		}
 
-		if (modMetadata.getDepends().isEmpty()) {
+		if (modMetadata.getDependencies().isEmpty()) {
 			throw new RuntimeException("Incorrect amount of dependencies");
 		}
 	}
@@ -175,11 +175,15 @@ final class V1ModJsonParsingTests {
 	}
 
 	/*
-	* Warning tests
-	*/
+	 * Warning tests
+	 */
 
 	@Test
-	public void testWarnings() {
+	public void testWarnings() { }
 
+	private static LoaderModMetadata parseMetadata(Path path) throws IOException, ParseMetadataException {
+		try (InputStream is = Files.newInputStream(path)) {
+			return ModMetadataParser.parseMetadata(null, "dummy", Collections.emptyList());
+		}
 	}
 }

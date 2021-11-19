@@ -26,8 +26,6 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import org.apache.logging.log4j.Logger;
-
 import net.fabricmc.loader.api.Version;
 import net.fabricmc.loader.api.VersionParsingException;
 import net.fabricmc.loader.api.metadata.ContactInformation;
@@ -42,7 +40,7 @@ final class V0ModMetadataParser {
 	private static final Pattern WEBSITE_PATTERN = Pattern.compile("\\((.+)\\)");
 	private static final Pattern EMAIL_PATTERN = Pattern.compile("<(.+)>");
 
-	public static LoaderModMetadata parse(Logger logger, JsonReader reader) throws IOException, ParseMetadataException {
+	public static LoaderModMetadata parse(JsonReader reader) throws IOException, ParseMetadataException {
 		List<ParseWarning> warnings = new ArrayList<>();
 
 		// All the values the `fabric.mod.json` may contain:
@@ -51,8 +49,7 @@ final class V0ModMetadataParser {
 		Version version = null;
 
 		// Optional (mod loading)
-		Map<String, ModDependency> requires = new HashMap<>();
-		Map<String, ModDependency> conflicts = new HashMap<>();
+		List<ModDependency> dependencies = new ArrayList<>();
 		V0ModMetadata.Mixins mixins = null;
 		ModEnvironment environment = ModEnvironment.UNIVERSAL; // Default is always universal
 		String initializer = null;
@@ -60,7 +57,6 @@ final class V0ModMetadataParser {
 
 		String name = null;
 		String description = null;
-		Map<String, ModDependency> recommends = new HashMap<>();
 		List<Person> authors = new ArrayList<>();
 		List<Person> contributors = new ArrayList<>();
 		ContactInformation links = null;
@@ -98,17 +94,17 @@ final class V0ModMetadataParser {
 				final String rawVersion = reader.nextString();
 
 				try {
-					version = VersionDeserializer.deserialize(rawVersion);
+					version = VersionParser.parse(rawVersion, false);
 				} catch (VersionParsingException e) {
 					throw new ParseMetadataException(String.format("Failed to parse version: %s", rawVersion), e);
 				}
 
 				break;
 			case "requires":
-				readDependenciesContainer(reader, requires, "requires");
+				readDependenciesContainer(reader, ModDependency.Kind.DEPENDS, dependencies, "requires");
 				break;
 			case "conflicts":
-				readDependenciesContainer(reader, conflicts, "conflicts");
+				readDependenciesContainer(reader, ModDependency.Kind.BREAKS, dependencies, "conflicts");
 				break;
 			case "mixins":
 				mixins = readMixins(warnings, reader);
@@ -185,7 +181,7 @@ final class V0ModMetadataParser {
 				description = reader.nextString();
 				break;
 			case "recommends":
-				readDependenciesContainer(reader, recommends, "recommends");
+				readDependenciesContainer(reader, ModDependency.Kind.SUGGESTS, dependencies, "recommends");
 				break;
 			case "authors":
 				readPeople(warnings, reader, authors);
@@ -204,7 +200,9 @@ final class V0ModMetadataParser {
 				license = reader.nextString();
 				break;
 			default:
-				warnings.add(new ParseWarning(reader.locationString(), key, "Unsupported root entry"));
+				if (!ModMetadataParser.IGNORED_KEYS.contains(key)) {
+					warnings.add(new ParseWarning(reader.locationString(), key, "Unsupported root entry"));
+				}
 				reader.skipValue();
 				break;
 			}
@@ -212,21 +210,21 @@ final class V0ModMetadataParser {
 
 		// Validate all required fields are resolved
 		if (id == null) {
-			throw new ParseMetadataException.MissingRequired("id");
+			throw new ParseMetadataException.MissingField("id");
 		}
 
 		if (version == null) {
-			throw new ParseMetadataException.MissingRequired("version");
+			throw new ParseMetadataException.MissingField("version");
 		}
 
-		FabricModMetadataReader.logWarningMessages(logger, id, warnings);
+		FabricModMetadataReader.logWarningMessages(id, warnings);
 
 		// Optional stuff
 		if (links == null) {
 			links = ContactInformation.EMPTY;
 		}
 
-		return new V0ModMetadata(id, version, requires, conflicts, mixins, environment, initializer, initializers, name, description, recommends, authors, contributors, links, license);
+		return new V0ModMetadata(id, version, dependencies, mixins, environment, initializer, initializers, name, description, authors, contributors, links, license);
 	}
 
 	private static ContactInformation readLinks(List<ParseWarning> warnings, JsonReader reader) throws IOException, ParseMetadataException {
@@ -276,7 +274,7 @@ final class V0ModMetadataParser {
 			throw new ParseMetadataException("Expected links to be an object or string", reader);
 		}
 
-		return new MapBackedContactInformation(contactInfo);
+		return new ContactInformationImpl(contactInfo);
 	}
 
 	private static V0ModMetadata.Mixins readMixins(List<ParseWarning> warnings, JsonReader reader) throws IOException, ParseMetadataException {
@@ -339,7 +337,7 @@ final class V0ModMetadataParser {
 		}
 	}
 
-	private static void readDependenciesContainer(JsonReader reader, Map<String, ModDependency> dependencies, String name) throws IOException, ParseMetadataException {
+	private static void readDependenciesContainer(JsonReader reader, ModDependency.Kind kind, List<ModDependency> dependencies, String name) throws IOException, ParseMetadataException {
 		if (reader.peek() != JsonToken.BEGIN_OBJECT) {
 			throw new ParseMetadataException(String.format("%s must be an object containing dependencies.", name), reader);
 		}
@@ -371,7 +369,11 @@ final class V0ModMetadataParser {
 				throw new ParseMetadataException("Expected version to be a string or array", reader);
 			}
 
-			dependencies.put(modId, new ModDependencyImpl(modId, versionMatchers));
+			try {
+				dependencies.add(new ModDependencyImpl(kind, modId, versionMatchers));
+			} catch (VersionParsingException e) {
+				throw new ParseMetadataException(e);
+			}
 		}
 
 		reader.endObject();
@@ -416,7 +418,7 @@ final class V0ModMetadataParser {
 
 			name = String.join(" ", parts);
 
-			return new ContactInfoBackedPerson(name, new MapBackedContactInformation(contactMap));
+			return new ContactInfoBackedPerson(name, new ContactInformationImpl(contactMap));
 		case BEGIN_OBJECT:
 			reader.beginObject();
 
@@ -452,7 +454,7 @@ final class V0ModMetadataParser {
 			}
 
 			reader.endObject();
-			return new ContactInfoBackedPerson(name, new MapBackedContactInformation(contactMap));
+			return new ContactInfoBackedPerson(name, new ContactInformationImpl(contactMap));
 		default:
 			throw new ParseMetadataException("Expected person to be a string or object", reader);
 		}

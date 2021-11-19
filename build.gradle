@@ -1,29 +1,60 @@
-plugins {
-	id "java-library"
-	id 'idea'
-	id 'eclipse'
-	id 'maven-publish'
-	id("org.cadixdev.licenser") version "0.5.0"
+buildscript {
+	dependencies {
+		classpath 'org.kohsuke:github-api:1.114'
+		classpath 'com.guardsquare:proguard-gradle:' + (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_11) ? '7.2.0-beta2' : '7.1.0')
+	}
 }
 
-def javaVersion = JavaVersion.VERSION_1_8
+plugins {
+	id 'java'
+	id 'java-library'
+	id 'eclipse'
+	id 'maven-publish'
+	id 'checkstyle'
+	id 'org.cadixdev.licenser' version '0.6.1'
+	id 'com.github.johnrengelman.shadow' version '7.0.0'
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
 
 archivesBaseName = "quilt-loader"
 
 def ENV = System.getenv()
-version = version + (ENV.GITHUB_ACTIONS ? (ENV.SNAPSHOTS_URL ? "-SNAPSHOT" : "") : "+local")
+
+allprojects {
+	apply plugin: 'java-library'
+	apply plugin: 'eclipse'
+	apply plugin: 'checkstyle'
+
+	version = version + (ENV.GITHUB_ACTIONS ? (ENV.SNAPSHOTS_URL ? "-SNAPSHOT" : "") : "+local")
+}
 
 repositories {
-	mavenCentral()
-
 	maven {
 		name = 'Quilt'
 		url = 'https://maven.quiltmc.org/repository/release'
 	}
 
+	mavenCentral()
+
 	maven {
 		name = 'Mojang'
 		url = 'https://libraries.minecraft.net/'
+	}
+}
+
+sourceSets {
+	main {
+		java.srcDirs = ['src/main/java', 'src/main/legacyJava']
+	}
+}
+
+configurations {
+	include
+
+	implementation {
+		extendsFrom include
 	}
 }
 
@@ -102,35 +133,48 @@ java {
 }
 
 jar {
-	manifest {
-		attributes (
-			"Main-Class": "org.quiltmc.impl.launch.server.QuiltServerLauncher"
-		)
-	}
-
+	enabled = false
+	from sourceSets.main.output
+	from project(":minecraft").sourceSets.main.output
 	from("LICENSE") {
 		rename { "${it}_${project.archivesBaseName}"}
 	}
+
+	manifest {
+		attributes (
+			"Main-Class": "org.quiltmc.impl.impl.launch.server.QuiltServerLauncher"
+		)
+	}
 }
 
-task copyJson(type: Copy, dependsOn: ["jar"]) {
-	from('src/main/resources/quilt-installer.json') {
-		rename { "${archivesBaseName}-${version}.json" }
-	}
-
-	into 'build/libs'
+sourcesJar {
+	from sourceSets.main.allSource
+	from project(":minecraft").sourceSets.main.allSource
 }
 
-task copyJsonLw(type: Copy, dependsOn: ["jar"]) {
-	from('src/main/resources/quilt-installer.launchwrapper.json') {
-		rename { "${archivesBaseName}-${version}.launchwrapper.json" }
-	}
+// useful for creating test mod jar
+task testJar(type: Jar) {
+	archiveClassifier = "test"
+	from sourceSets.test.output
+}
 
-	into 'build/libs'
+task copyJson() {
+	def inJson = file('src/main/resources/quilt-installer.json')
+	def inLwJson = file('src/main/resources/quilt-installer.launchwrapper.json')
+
+	def outJson = file("build/libs/${archivesBaseName}-${version}.json")
+	def outLwJson = file("build/libs/${archivesBaseName}-${version}.launchwrapper.json")
+
+	inputs.files (inJson, inLwJson)
+	outputs.files(outJson, outLwJson)
+
+	doLast {
+		outJson.text = inJson.text
+		outLwJson.text = inLwJson.text
+	}
 }
 
 tasks.build.dependsOn "copyJson"
-tasks.build.dependsOn "copyJsonLw"
 
 tasks.withType(JavaCompile).configureEach {
 	it.options.encoding = "UTF-8"
@@ -168,22 +212,50 @@ javadoc {
 	failOnError = false
 }
 
-license {
-	header file("codeformat/FABRIC-HEADER")
-	include '**/*.java'
+task javadocJar(type: Jar) {
+	dependsOn javadoc
+	from javadoc.destinationDir
+	archiveClassifier = 'javadoc'
+}
+
+build.dependsOn javadocJar
+
+allprojects {
+	checkstyle {
+		configFile = project.rootProject.file("checkstyle.xml")
+		toolVersion = '8.44'
+	}
+
+	license {
+		header project.rootProject.file("codeformat/FABRIC-HEADER")
+		include '**/*.java'
+
+		// Exclude gson since it is google's code, we just modify and bundle it
+		exclude '**/lib/gson/*.java'
+	}
+}
+
+// Causes more trouble than its worth
+tasks.withType(GenerateModuleMetadata) {
+	enabled = false
 }
 
 publishing {
 	publications {
 		mavenJava(MavenPublication) {
-			from components.java
-
-			artifact(file('src/main/resources/quilt-installer.json')) {
-				builtBy jar
+			// add all the jars that should be included when publishing to maven
+			artifact(file("${project.buildDir}/libs/$archivesBaseName-${version}.jar")) {
+				builtBy remapJar
 			}
-
+			artifact(sourcesJar) {
+				builtBy remapSourcesJar
+			}
+			artifact javadocJar
+			artifact(file('src/main/resources/quilt-installer.json')) {
+				builtBy remapJar
+			}
 			artifact(file('src/main/resources/quilt-installer.launchwrapper.json')) {
-				builtBy jar
+				builtBy remapJar
 				classifier = "launchwrapper"
 			}
 		}
@@ -210,6 +282,38 @@ publishing {
 		} else {
 			mavenLocal()
 		}
+	}
+}
+
+def getBranch() {
+	def ENV = System.getenv()
+	if (ENV.GITHUB_REF) {
+		def branch = ENV.GITHUB_REF
+		return branch.substring(branch.lastIndexOf("/") + 1)
+	}
+
+	return "unknown"
+}
+
+import org.kohsuke.github.GHReleaseBuilder
+import org.kohsuke.github.GitHub
+
+task github(dependsOn: publish) {
+	onlyIf {
+		ENV.GITHUB_TOKEN
+	}
+
+	doLast {
+		def github = GitHub.connectUsingOAuth(ENV.GITHUB_TOKEN as String)
+		def repository = github.getRepository(ENV.GITHUB_REPOSITORY)
+
+		def releaseBuilder = new GHReleaseBuilder(repository, version as String)
+		releaseBuilder.name("Quilt Loader $version")
+		releaseBuilder.body(ENV.CHANGELOG ?: "No changelog provided")
+		releaseBuilder.commitish(getBranch())
+		releaseBuilder.prerelease(false)
+
+		releaseBuilder.create()
 	}
 }
 
@@ -241,3 +345,6 @@ class RefreshMetaTask extends DefaultTask {
 		}
 	}
 }
+
+publish.mustRunAfter checkVersion
+github.mustRunAfter checkVersion

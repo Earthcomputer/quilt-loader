@@ -33,7 +33,7 @@ import net.fabricmc.loader.api.metadata.ModDependency;
 import net.fabricmc.loader.api.metadata.ModEnvironment;
 import net.fabricmc.loader.api.metadata.ModMetadata;
 import net.fabricmc.loader.api.metadata.Person;
-import net.fabricmc.loader.impl.util.version.VersionDeserializer;
+import net.fabricmc.loader.impl.util.version.VersionParser;
 
 public final class BuiltinModMetadata extends AbstractModMetadata {
 	private final String id;
@@ -46,11 +46,7 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 	private final ContactInformation contact;
 	private final Collection<String> license;
 	private final NavigableMap<Integer, String> icons;
-	private final Collection<ModDependency> depends;
-	private final Collection<ModDependency> recommends;
-	private final Collection<ModDependency> suggests;
-	private final Collection<ModDependency> conflicts;
-	private final Collection<ModDependency> breaks;
+	private final Collection<ModDependency> dependencies;
 
 	private BuiltinModMetadata(String id, Version version,
 			ModEnvironment environment,
@@ -59,12 +55,7 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 			ContactInformation contact,
 			Collection<String> license,
 			NavigableMap<Integer, String> icons,
-			Collection<ModDependency> depends,
-			Collection<ModDependency> recommends,
-			Collection<ModDependency> suggests,
-			Collection<ModDependency> conflicts,
-			Collection<ModDependency> breaks) {
-
+			Collection<ModDependency> dependencies) {
 		this.id = id;
 		this.version = version;
 		this.environment = environment;
@@ -80,11 +71,12 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 		this.suggests = Collections.unmodifiableCollection(suggests);
 		this.conflicts = Collections.unmodifiableCollection(conflicts);
 		this.breaks = Collections.unmodifiableCollection(breaks);
+		this.dependencies = Collections.unmodifiableCollection(DependencyOverrides.INSTANCE.apply(id, dependencies));
 	}
 
 	@Override
 	public String getType() {
-		return "builtin";
+		return TYPE_BUILTIN;
 	}
 
 	@Override
@@ -149,21 +141,24 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 	}
 
 	@Override
-	public Collection<ModDependency> getDepends() { return depends; }
+	public Collection<ModDependency> getDependencies() {
+		return dependencies;
+	}
+
 	@Override
-	public Collection<ModDependency> getRecommends() { return recommends; }
+	public boolean containsCustomValue(String key) {
+		return false;
+	}
+
 	@Override
-	public Collection<ModDependency> getSuggests() { return suggests; }
+	public CustomValue getCustomValue(String key) {
+		return null;
+	}
+
 	@Override
-	public Collection<ModDependency> getConflicts() { return conflicts; }
-	@Override
-	public Collection<ModDependency> getBreaks() { return breaks; }
-	@Override
-	public boolean containsCustomValue(String key) { return false; }
-	@Override
-	public CustomValue getCustomValue(String key) { return null; }
-	@Override
-	public Map<String, CustomValue> getCustomValues() { return Collections.emptyMap(); }
+	public Map<String, CustomValue> getCustomValues() {
+		return Collections.emptyMap();
+	}
 
 	public static class Builder {
 		private final String id;
@@ -176,17 +171,13 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 		private ContactInformation contact = ContactInformation.EMPTY;
 		private final Collection<String> license = new ArrayList<>();
 		private final NavigableMap<Integer, String> icons = new TreeMap<>();
-		private final Collection<ModDependency> depends = new ArrayList<>();
-		private final Collection<ModDependency> recommends = new ArrayList<>();
-		private final Collection<ModDependency> suggests = new ArrayList<>();
-		private final Collection<ModDependency> conflicts = new ArrayList<>();
-		private final Collection<ModDependency> breaks = new ArrayList<>();
+		private final Collection<ModDependency> dependencies = new ArrayList<>();
 
 		public Builder(String id, String version) {
 			this.name = this.id = id;
 
 			try {
-				this.version = VersionDeserializer.deserializeSemantic(version);
+				this.version = VersionParser.parseSemantic(version);
 			} catch (VersionParsingException e) {
 				throw new RuntimeException(e);
 			}
@@ -257,8 +248,13 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 		}
 
 
+		public Builder addDependency(ModDependency dependency) {
+			this.dependencies.add(dependency);
+			return this;
+		}
+
 		public ModMetadata build() {
-			return new BuiltinModMetadata(id, version, environment, name, description, authors, contributors, contact, license, icons, depends, recommends, suggests, conflicts, breaks);
+			return new BuiltinModMetadata(id, version, environment, name, description, authors, contributors, contact, license, icons, dependencies);
 		}
 
 		private static Person createPerson(String name, Map<String, String> contactMap) {
@@ -273,7 +269,7 @@ public final class BuiltinModMetadata extends AbstractModMetadata {
 					return contact;
 				}
 
-				private final ContactInformation contact = contactMap.isEmpty() ? ContactInformation.EMPTY : new MapBackedContactInformation(contactMap);
+				private final ContactInformation contact = contactMap.isEmpty() ? ContactInformation.EMPTY : new ContactInformationImpl(contactMap);
 			};
 		}
 	}

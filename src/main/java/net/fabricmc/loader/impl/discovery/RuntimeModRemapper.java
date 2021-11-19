@@ -16,8 +16,6 @@
 
 package net.fabricmc.loader.impl.discovery;
 
-import org.objectweb.asm.commons.Remapper;
-
 import net.fabricmc.accesswidener.AccessWidener;
 import net.fabricmc.accesswidener.AccessWidenerReader;
 import net.fabricmc.accesswidener.AccessWidenerRemapper;
@@ -39,8 +37,6 @@ import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.Files;
@@ -52,24 +48,36 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
+
+import org.objectweb.asm.commons.Remapper;
+
+import net.fabricmc.accesswidener.AccessWidenerReader;
+import net.fabricmc.accesswidener.AccessWidenerRemapper;
+import net.fabricmc.accesswidener.AccessWidenerWriter;
+import net.fabricmc.loader.impl.launch.FabricLauncher;
+import net.fabricmc.loader.impl.launch.FabricLauncherBase;
+import net.fabricmc.loader.impl.util.FileSystemUtil;
+import net.fabricmc.loader.impl.util.SystemProperties;
+import net.fabricmc.loader.impl.util.log.Log;
+import net.fabricmc.loader.impl.util.log.LogCategory;
+import net.fabricmc.loader.impl.util.mappings.TinyRemapperMappingsHelper;
+import net.fabricmc.tinyremapper.InputTag;
+import net.fabricmc.tinyremapper.NonClassCopyMode;
+import net.fabricmc.tinyremapper.OutputConsumerPath;
+import net.fabricmc.tinyremapper.TinyRemapper;
 
 public final class RuntimeModRemapper {
+	public static void remap(Collection<ModCandidate> modCandidates, Path tmpDir, Path outputDir) {
+		List<ModCandidate> modsToRemap = new ArrayList<>();
 
-	public static Collection<ModCandidate> remap(Collection<ModCandidate> modCandidates, FileSystem fileSystem) {
-		List<ModCandidate> modsToRemap = modCandidates.stream()
-				.filter(ModCandidate::requiresRemap)
-				.collect(Collectors.toList());
-
-		if (modsToRemap.isEmpty()) {
-			return modCandidates;
+		for (ModCandidate mod : modCandidates) {
+			if (mod.getRequiresRemap()) {
+				modsToRemap.add(mod);
+			}
 		}
 
-		List<ModCandidate> modsToSkip = modCandidates.stream()
-				.filter(mc -> !mc.requiresRemap())
-				.collect(Collectors.toList());
+		if (modsToRemap.isEmpty()) return;
 
 		FabricLauncher launcher = FabricLauncherBase.getLauncher();
 
@@ -84,18 +92,25 @@ public final class RuntimeModRemapper {
 			throw new RuntimeException("Failed to populate remap classpath", e);
 		}
 
-		List<ModCandidate> remappedMods = new ArrayList<>();
+		Map<ModCandidate, RemapInfo> infoMap = new HashMap<>();
 
 		try {
-			Map<ModCandidate, RemapInfo> infoMap = new HashMap<>();
-
 			for (ModCandidate mod : modsToRemap) {
 				RemapInfo info = new RemapInfo();
 				infoMap.put(mod, info);
 
 				InputTag tag = remapper.createInputTag();
 				info.tag = tag;
-				info.inputPath = UrlUtil.asPath(mod.getOriginUrl());
+
+				if (mod.hasPath()) {
+					info.inputPath = mod.getPath();
+				} else {
+					info.inputPath = mod.copyToDir(tmpDir, true);
+					info.inputIsTemp = true;
+				}
+
+				info.outputPath = outputDir.resolve(mod.getDefaultFileName());
+				Files.deleteIfExists(info.outputPath);
 
 				remapper.readInputsAsync(tag, info.inputPath);
 			}
@@ -103,7 +118,6 @@ public final class RuntimeModRemapper {
 			//Done in a 2nd loop as we need to make sure all the inputs are present before remapping
 			for (ModCandidate mod : modsToRemap) {
 				RemapInfo info = infoMap.get(mod);
-				info.outputPath = fileSystem.getPath(UUID.randomUUID() + ".jar");
 				OutputConsumerPath outputConsumer = new OutputConsumerPath.Builder(info.outputPath).build();
 
 				FileSystemUtil.FileSystemDelegate delegate = FileSystemUtil.getJarFileSystem(info.inputPath, false);
@@ -124,7 +138,7 @@ public final class RuntimeModRemapper {
 			for (ModCandidate mod : modsToRemap) {
 				RemapInfo info = infoMap.get(mod);
 
-				String accessWidener = mod.getInfo().getAccessWidener();
+				String accessWidener = mod.getMetadata().getAccessWidener();
 
 				if (accessWidener != null) {
 					info.accessWidenerPath = accessWidener;
@@ -152,35 +166,41 @@ public final class RuntimeModRemapper {
 					}
 				}
 
-				remappedMods.add(new ModCandidate(mod.getInfo(), UrlUtil.asUrl(info.outputPath), 0, false));
+				mod.setPath(info.outputPath);
+			}
+		} catch (Throwable t) {
+			remapper.finish();
+
+			for (RemapInfo info : infoMap.values()) {
+				if (info.outputPath == null) {
+					continue;
+				}
+
+				try {
+					Files.deleteIfExists(info.outputPath);
+				} catch (IOException e) {
+					Log.warn(LogCategory.MOD_REMAP, "Error deleting failed output jar %s", info.outputPath, e);
+				}
 			}
 
-		} catch (UrlConversionException | IOException e) {
-			remapper.finish();
-			throw new RuntimeException("Failed to remap mods", e);
+			throw new RuntimeException("Failed to remap mods", t);
+		} finally {
+			for (RemapInfo info : infoMap.values()) {
+				try {
+					if (info.inputIsTemp) Files.deleteIfExists(info.inputPath);
+				} catch (IOException e) {
+					Log.warn(LogCategory.MOD_REMAP, "Error deleting temporary input jar %s", info.inputIsTemp, e);
+				}
+			}
 		}
-
-		return Stream.concat(remappedMods.stream(), modsToSkip.stream())
-				.collect(Collectors.toList());
 	}
 
 	private static byte[] remapAccessWidener(byte[] input, Remapper remapper) {
-		try (BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(new ByteArrayInputStream(input), StandardCharsets.UTF_8))) {
-			AccessWidener accessWidener = new AccessWidener();
-			AccessWidenerReader accessWidenerReader = new AccessWidenerReader(accessWidener);
-			accessWidenerReader.read(bufferedReader, "intermediary");
-
-			AccessWidenerRemapper accessWidenerRemapper = new AccessWidenerRemapper(accessWidener, remapper, "named");
-			AccessWidener remapped = accessWidenerRemapper.remap();
-			AccessWidenerWriter accessWidenerWriter = new AccessWidenerWriter(remapped);
-
-			try (StringWriter writer = new StringWriter()) {
-				accessWidenerWriter.write(writer);
-				return writer.toString().getBytes(StandardCharsets.UTF_8);
-			}
-		} catch (IOException e) {
-			throw new RuntimeException(e);
-		}
+		AccessWidenerWriter writer = new AccessWidenerWriter();
+		AccessWidenerRemapper remappingDecorator = new AccessWidenerRemapper(writer, remapper, "intermediary", "named");
+		AccessWidenerReader accessWidenerReader = new AccessWidenerReader(remappingDecorator);
+		accessWidenerReader.read(input, "intermediary");
+		return writer.write();
 	}
 
 	private static List<Path> getRemapClasspath() throws IOException {
@@ -201,6 +221,7 @@ public final class RuntimeModRemapper {
 		InputTag tag;
 		Path inputPath;
 		Path outputPath;
+		boolean inputIsTemp;
 		OutputConsumerPath outputConsumerPath;
 		String accessWidenerPath;
 		byte[] accessWidener;

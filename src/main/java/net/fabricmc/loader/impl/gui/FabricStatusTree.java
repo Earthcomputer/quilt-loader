@@ -16,20 +16,20 @@
 
 package net.fabricmc.loader.impl.gui;
 
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.Map;
-
-import net.fabricmc.json5.JsonReader;
-import net.fabricmc.json5.JsonToken;
-import net.fabricmc.json5.JsonWriter;
+import java.util.Objects;
+import java.util.Set;
+import java.util.StringJoiner;
+import java.util.function.UnaryOperator;
 
 public final class FabricStatusTree {
 	public enum FabricTreeWarningLevel {
@@ -87,21 +87,19 @@ public final class FabricStatusTree {
 
 	public enum FabricBasicButtonType {
 		/** Sends the status message to the main application, then disables itself. */
-		CLICK_ONCE;
+		CLICK_ONCE,
+		/** Sends the status message to the main application, remains enabled. */
+		CLICK_MANY;
 	}
 
 	/** No icon is displayed. */
 	public static final String ICON_TYPE_DEFAULT = "";
-
 	/** Generic folder. */
 	public static final String ICON_TYPE_FOLDER = "folder";
-
 	/** Generic (unknown contents) file. */
 	public static final String ICON_TYPE_UNKNOWN_FILE = "file";
-
 	/** Generic non-Fabric jar file. */
 	public static final String ICON_TYPE_JAR_FILE = "jar";
-
 	/** Generic Fabric-related jar file. */
 	public static final String ICON_TYPE_FABRIC_JAR_FILE = "jar+fabric";
 
@@ -116,7 +114,6 @@ public final class FabricStatusTree {
 
 	/** Generic JSON file. */
 	public static final String ICON_TYPE_JSON = "json";
-
 	/** A file called "fabric.mod.json". */
 	public static final String ICON_TYPE_FABRIC_JSON = "json+fabric";
 
@@ -125,24 +122,57 @@ public final class FabricStatusTree {
 
 	/** Java bytecode class file. */
 	public static final String ICON_TYPE_JAVA_CLASS = "java_class";
-
 	/** A folder inside of a Java JAR. */
 	public static final String ICON_TYPE_PACKAGE = "package";
-
 	/** A folder that contains Java class files. */
 	public static final String ICON_TYPE_JAVA_PACKAGE = "java_package";
-
 	/** A tick symbol, used to indicate that something matched. */
 	public static final String ICON_TYPE_TICK = "tick";
-
 	/** A cross symbol, used to indicate that something didn't match (although it's not an error). Used as the opposite
 	 * of {@link #ICON_TYPE_TICK} */
 	public static final String ICON_TYPE_LESSER_CROSS = "lesser_cross";
 
+	public final String title;
+	public final String mainText;
 	public final List<FabricStatusTab> tabs = new ArrayList<>();
 	public final List<FabricStatusButton> buttons = new ArrayList<>();
 
-	public String mainText = null;
+	public FabricStatusTree(String title, String mainText) {
+		Objects.requireNonNull(title, "null title");
+		Objects.requireNonNull(mainText, "null mainText");
+
+		this.title = title;
+		this.mainText = mainText;
+	}
+
+	public FabricStatusTree(DataInputStream is) throws IOException {
+		title = is.readUTF();
+		mainText = is.readUTF();
+
+		for (int i = is.readInt(); i > 0; i--) {
+			tabs.add(new FabricStatusTab(is));
+		}
+
+		for (int i = is.readInt(); i > 0; i--) {
+			buttons.add(new FabricStatusButton(is));
+		}
+	}
+
+	public void writeTo(DataOutputStream os) throws IOException {
+		os.writeUTF(title);
+		os.writeUTF(mainText);
+		os.writeInt(tabs.size());
+
+		for (FabricStatusTab tab : tabs) {
+			tab.writeTo(os);
+		}
+
+		os.writeInt(buttons.size());
+
+		for (FabricStatusButton button : buttons) {
+			button.writeTo(os);
+		}
+	}
 
 	public FabricStatusTree() {}
 
@@ -153,8 +183,8 @@ public final class FabricStatusTree {
 		return tab;
 	}
 
-	public FabricStatusButton addButton(String text) {
-		FabricStatusButton button = new FabricStatusButton(text);
+	public FabricStatusButton addButton(String text, FabricBasicButtonType type) {
+		FabricStatusButton button = new FabricStatusButton(text, type);
 		buttons.add(button);
 		return button;
 	}
@@ -179,7 +209,7 @@ public final class FabricStatusTree {
 			buttons.add(new FabricStatusButton(reader));
 		}
 		reader.endArray();
-	
+
 		reader.endObject();
 	}
 
@@ -218,10 +248,38 @@ public final class FabricStatusTree {
 
 	public static final class FabricStatusButton {
 		public final String text;
+		public final FabricBasicButtonType type;
+		public String clipboard;
 		public boolean shouldClose, shouldContinue;
 
-		public FabricStatusButton(String text) {
+		public FabricStatusButton(String text, FabricBasicButtonType type) {
+			Objects.requireNonNull(text, "null text");
+
 			this.text = text;
+			this.type = type;
+		}
+
+		public FabricStatusButton(DataInputStream is) throws IOException {
+			text = is.readUTF();
+			type = FabricBasicButtonType.valueOf(is.readUTF());
+			shouldClose = is.readBoolean();
+			shouldContinue = is.readBoolean();
+
+			if (is.readBoolean()) clipboard = is.readUTF();
+		}
+
+		public void writeTo(DataOutputStream os) throws IOException {
+			os.writeUTF(text);
+			os.writeUTF(type.name());
+			os.writeBoolean(shouldClose);
+			os.writeBoolean(shouldContinue);
+
+			if (clipboard != null) {
+				os.writeBoolean(true);
+				os.writeUTF(clipboard);
+			} else {
+				os.writeBoolean(false);
+			}
 		}
 
 		public FabricStatusButton makeClose() {
@@ -252,6 +310,11 @@ public final class FabricStatusTree {
 			writer.name("shouldContinue").value(shouldContinue);
 			writer.endObject();
 		}
+
+		public FabricStatusButton withClipboard(String clipboard) {
+			this.clipboard = clipboard;
+			return this;
+		}
 	}
 
 	public static final class FabricStatusTab {
@@ -262,6 +325,16 @@ public final class FabricStatusTree {
 
 		public FabricStatusTab(String name) {
 			this.node = new FabricStatusNode(null, name);
+		}
+
+		public FabricStatusTab(DataInputStream is) throws IOException {
+			node = new FabricStatusNode(null, is);
+			filterLevel = FabricTreeWarningLevel.valueOf(is.readUTF());
+		}
+
+		public void writeTo(DataOutputStream os) throws IOException {
+			node.writeTo(os);
+			os.writeUTF(filterLevel.name());
 		}
 
 		public FabricStatusNode addChild(String name) {
@@ -288,24 +361,20 @@ public final class FabricStatusTree {
 
 	public static final class FabricStatusNode {
 		private FabricStatusNode parent;
-
 		public String name;
-
 		/** The icon type. There can be a maximum of 2 decorations (added with "+" symbols), or 3 if the
 		 * {@link #setWarningLevel(FabricTreeWarningLevel) warning level} is set to
 		 * {@link FabricTreeWarningLevel#NONE } */
 		public String iconType = ICON_TYPE_DEFAULT;
-
 		private FabricTreeWarningLevel warningLevel = FabricTreeWarningLevel.NONE;
-
 		public boolean expandByDefault = false;
-
-		public final List<FabricStatusNode> children = new ArrayList<>();
-
 		/** Extra text for more information. Lines should be separated by "\n". */
 		public String details;
+		public final List<FabricStatusNode> children = new ArrayList<>();
 
 		private FabricStatusNode(FabricStatusNode parent, String name) {
+			Objects.requireNonNull(name, "null name");
+
 			this.parent = parent;
 			this.name = name;
 		}
@@ -375,6 +444,7 @@ public final class FabricStatusTree {
 				}
 
 				this.warningLevel = level;
+				expandByDefault |= level.isAtLeast(FabricTreeWarningLevel.WARN);
 			}
 		}
 
@@ -395,6 +465,7 @@ public final class FabricStatusTree {
 			FabricTreeWarningLevel level = null;
 
 			while (string.startsWith("\t")) {
+
 				indent++;
 				string = string.substring(1);
 			}
@@ -449,22 +520,90 @@ public final class FabricStatusTree {
 		}
 
 		public FabricStatusNode addException(Throwable exception) {
-			FabricStatusNode sub = new FabricStatusNode(this, "...");
-			children.add(sub);
+			return addException(this, Collections.newSetFromMap(new IdentityHashMap<>()), exception, UnaryOperator.identity(), new StackTraceElement[0]);
+		}
 
-			sub.setError();
-			String msg = exception.getMessage();
-			String[] lines = (msg == null ? exception.toString() : msg).split("\n");
+		public FabricStatusNode addCleanedException(Throwable exception) {
+			return addException(this, Collections.newSetFromMap(new IdentityHashMap<>()), exception, e -> {
+				// Remove some self-repeating exception traces from the tree
+				// (for example the RuntimeException that is is created unnecessarily by ForkJoinTask)
+				Throwable cause;
 
-			if (lines.length == 0) {
-				sub.name = exception.toString();
-			} else {
-				sub.name = lines[0];
+				while ((cause = e.getCause()) != null) {
+					if (e.getSuppressed().length > 0) {
+						break;
+					}
 
-				for (int i = 1; i < lines.length; i++) {
-					sub.addChild(lines[i]);
+					String msg = e.getMessage();
+
+					if (msg == null) {
+						msg = e.getClass().getName();
+					}
+
+					if (!msg.equals(cause.getMessage()) && !msg.equals(cause.toString())) {
+						break;
+					}
+
+					e = cause;
 				}
+
+				return e;
+			}, new StackTraceElement[0]);
+		}
+
+		private static FabricStatusNode addException(FabricStatusNode node, Set<Throwable> seen, Throwable exception, UnaryOperator<Throwable> filter, StackTraceElement[] parentTrace) {
+			if (!seen.add(exception)) {
+				return node;
 			}
+
+			exception = filter.apply(exception);
+			FabricStatusNode sub = node.addException(exception, parentTrace);
+			StackTraceElement[] trace = exception.getStackTrace();
+
+			for (Throwable t : exception.getSuppressed()) {
+				FabricStatusNode suppressed = addException(sub, seen, t, filter, trace);
+				suppressed.name += " (suppressed)";
+				suppressed.expandByDefault = false;
+			}
+
+			if (exception.getCause() != null) {
+				addException(sub, seen, exception.getCause(), filter, trace);
+			}
+
+			return sub;
+		}
+
+		private FabricStatusNode addException(Throwable exception, StackTraceElement[] parentTrace) {
+			String msg = exception.getMessage();
+			String[] lines = (msg == null || msg.isEmpty() ? exception.toString() : msg).split("\n");
+
+			FabricStatusNode sub = new FabricStatusNode(this, lines[0]);
+			children.add(sub);
+			sub.setError();
+
+			for (int i = 1; i < lines.length; i++) {
+				sub.addChild(lines[i]);
+			}
+
+			StackTraceElement[] trace = exception.getStackTrace();
+			int uniqueFrames = trace.length - 1;
+
+			for (int i = parentTrace.length - 1; uniqueFrames >= 0 && i >= 0 && trace[uniqueFrames].equals(parentTrace[i]); i--) {
+				uniqueFrames--;
+			}
+
+			StringJoiner frames = new StringJoiner("<br/>", "<html>", "</html>");
+			int inheritedFrames = trace.length - 1 - uniqueFrames;
+
+			for (int i = 0; i <= uniqueFrames; i++) {
+				frames.add("at " + trace[i]);
+			}
+
+			if (inheritedFrames > 0) {
+				frames.add("... " + inheritedFrames + " more");
+			}
+
+			sub.addChild(frames.toString()).iconType = ICON_TYPE_JAVA_CLASS;
 
 			StringWriter sw = new StringWriter();
 			exception.printStackTrace(new PrintWriter(sw));

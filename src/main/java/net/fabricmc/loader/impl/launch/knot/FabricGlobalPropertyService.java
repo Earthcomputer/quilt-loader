@@ -20,6 +20,8 @@ import net.fabricmc.loader.impl.launch.common.FabricLauncherBase;
 import org.spongepowered.asm.service.IGlobalPropertyService;
 import org.spongepowered.asm.service.IPropertyKey;
 
+import net.fabricmc.loader.impl.launch.FabricLauncherBase;
+
 public class FabricGlobalPropertyService implements IGlobalPropertyService {
 	@Override
 	public IPropertyKey resolveKey(String name) {

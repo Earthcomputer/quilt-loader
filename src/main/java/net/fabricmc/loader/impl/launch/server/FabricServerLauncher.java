@@ -22,18 +22,28 @@ import net.fabricmc.loader.impl.util.UrlUtil;
 import java.io.*;
 import java.net.URL;
 import java.net.URLClassLoader;
-import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Properties;
+
+import net.fabricmc.loader.impl.launch.knot.KnotServer;
+import net.fabricmc.loader.impl.util.SystemProperties;
+import net.fabricmc.loader.impl.util.UrlUtil;
 
 public class FabricServerLauncher {
 	private static final ClassLoader parentLoader = FabricServerLauncher.class.getClassLoader();
-	private static String mainClass = "net.fabricmc.loader.impl.launch.knot.KnotServer";
+	private static String mainClass = KnotServer.class.getName();
 
 	public static void main(String[] args) {
 		URL propUrl = parentLoader.getResource("fabric-server-launch.properties");
+
 		if (propUrl != null) {
 			Properties properties = new Properties();
-			try (InputStream is = propUrl.openStream()) {
-				properties.load(is);
+
+			try (InputStreamReader reader = new InputStreamReader(propUrl.openStream(), StandardCharsets.UTF_8)) {
+				properties.load(reader);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -66,13 +76,39 @@ public class FabricServerLauncher {
 	}
 
 	private static void setup(String... runArguments) throws IOException {
+		if (System.getProperty(SystemProperties.GAME_JAR_PATH) == null) {
+			System.setProperty(SystemProperties.GAME_JAR_PATH, getServerJarPath());
+		}
+
+		Path serverJar = Paths.get(System.getProperty(SystemProperties.GAME_JAR_PATH)).toAbsolutePath().normalize();
+
+		if (!Files.exists(serverJar)) {
+			System.err.println("The Minecraft server .JAR is missing (" + serverJar + ")!");
+			System.err.println();
+			System.err.println("Fabric's server-side launcher expects the server .JAR to be provided.");
+			System.err.println("You can edit its location in fabric-server-launcher.properties.");
+			System.err.println();
+			System.err.println("Without the official Minecraft server .JAR, Fabric Loader cannot launch.");
+			throw new RuntimeException("Missing game jar at " + serverJar);
+		}
+
+		try {
+			URLClassLoader newClassLoader = new InjectingURLClassLoader(new URL[] { FabricServerLauncher.class.getProtectionDomain().getCodeSource().getLocation(), UrlUtil.asUrl(serverJar) }, parentLoader, "com.google.common.jimfs.");
+			Thread.currentThread().setContextClassLoader(newClassLoader);
+			launch(mainClass, newClassLoader, runArguments);
+		} catch (Exception ex) {
+			throw new RuntimeException(ex);
+		}
+	}
+
+	private static String getServerJarPath() throws IOException {
 		// Pre-load "fabric-server-launcher.properties"
-		File propertiesFile = new File("fabric-server-launcher.properties");
+		Path propertiesFile = Paths.get("fabric-server-launcher.properties");
 		Properties properties = new Properties();
 
-		if (propertiesFile.exists()) {
-			try (FileInputStream stream = new FileInputStream(propertiesFile)) {
-				properties.load(stream);
+		if (Files.exists(propertiesFile)) {
+			try (Reader reader = Files.newBufferedReader(propertiesFile)) {
+				properties.load(reader);
 			}
 		}
 
@@ -82,30 +118,12 @@ public class FabricServerLauncher {
 		// a few versions... let's use this.
 		if (!properties.containsKey("serverJar")) {
 			properties.put("serverJar", "server.jar");
-			try (FileOutputStream stream = new FileOutputStream(propertiesFile)) {
-				properties.store(stream, null);
+
+			try (Writer writer = Files.newBufferedWriter(propertiesFile)) {
+				properties.store(writer, null);
 			}
 		}
 
-		File serverJar = new File((String) properties.get("serverJar"));
-
-		if (!serverJar.exists()) {
-			System.err.println("Could not find Minecraft server .JAR (" + properties.get("serverJar") + ")!");
-			System.err.println();
-			System.err.println("Fabric's server-side launcher expects the server .JAR to be provided.");
-			System.err.println("You can edit its location in fabric-server-launcher.properties.");
-			System.err.println();
-			System.err.println("Without the official Minecraft server .JAR, Fabric Loader cannot launch.");
-			throw new RuntimeException("Searched for '" + serverJar.getName() + "' but could not find it.");
-		}
-
-		System.setProperty(SystemProperties.GAME_JAR_PATH, serverJar.getAbsolutePath());
-		try {
-			URLClassLoader newClassLoader = new InjectingURLClassLoader(new URL[] { FabricServerLauncher.class.getProtectionDomain().getCodeSource().getLocation(), UrlUtil.asUrl(serverJar) }, parentLoader, "com.google.common.jimfs.");
-			Thread.currentThread().setContextClassLoader(newClassLoader);
-			launch(mainClass, newClassLoader, runArguments);
-		} catch (Exception ex) {
-			throw new RuntimeException(ex);
-		}
+		return (String) properties.get("serverJar");
 	}
 }

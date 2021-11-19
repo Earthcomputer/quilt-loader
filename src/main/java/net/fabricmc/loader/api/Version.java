@@ -28,7 +28,7 @@ import net.fabricmc.loader.impl.util.version.FabricSemanticVersionImpl;
  * Representation of a version.
  */
 @ApiStatus.NonExtendable
-public interface Version {
+public interface Version extends Comparable<Version> {
 	static Version of(String raw) {
 		try {
 			return Semantic.of(raw);

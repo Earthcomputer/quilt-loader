@@ -25,24 +25,12 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
 
+import net.fabricmc.accesswidener.AccessWidenerClassVisitor;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.loader.impl.FabricLoaderImpl;
+import net.fabricmc.loader.impl.launch.FabricLauncherBase;
+
 public final class FabricTransformer {
-	public static byte[] lwTransformerHook(String name, String transformedName, byte[] bytes) {
-		boolean isDevelopment = FabricLauncherBase.getLauncher().isDevelopment();
-		EnvType envType = FabricLauncherBase.getLauncher().getEnvironmentType();
-
-		byte[] input = MinecraftGameProvider.TRANSFORMER.transform(name);
-		if (input != null) {
-			return FabricTransformer.transform(isDevelopment, envType, name, input);
-		} else {
-			if (bytes != null) {
-				return FabricTransformer.transform(isDevelopment, envType, name, bytes);
-			} else {
-				return null;
-			}
-		}
-
-	}
-
 	public static byte[] transform(boolean isDevelopment, EnvType envType, String name, byte[] bytes) {
 		// FIXME: Could use a better way to detect this...
 		boolean isMinecraftClass = name.startsWith("net.minecraft.") || name.startsWith("com.mojang.blaze3d.") || name.indexOf('.') < 0;
@@ -60,7 +48,7 @@ public final class FabricTransformer {
 		int visitorCount = 0;
 
 		if (applyAccessWidener) {
-			visitor = AccessWidenerVisitor.createClassVisitor(FabricLoaderImpl.ASM_VERSION, visitor, FabricLoaderImpl.INSTANCE.getAccessWidener());
+			visitor = AccessWidenerClassVisitor.createClassVisitor(FabricLoaderImpl.ASM_VERSION, visitor, FabricLoaderImpl.INSTANCE.getAccessWidener());
 			visitorCount++;
 		}
 
@@ -72,9 +60,11 @@ public final class FabricTransformer {
 		if (environmentStrip) {
 			EnvironmentStrippingData stripData = new EnvironmentStrippingData(FabricLoaderImpl.ASM_VERSION, envType.toString());
 			classReader.accept(stripData, ClassReader.SKIP_CODE | ClassReader.SKIP_FRAMES);
+
 			if (stripData.stripEntireClass()) {
 				throw new RuntimeException("Cannot load class " + name + " in environment type " + envType);
 			}
+
 			if (!stripData.isEmpty()) {
 				visitor = new ClassStripper(FabricLoaderImpl.ASM_VERSION, visitor, stripData.getStripInterfaces(), stripData.getStripFields(), stripData.getStripMethods());
 				visitorCount++;

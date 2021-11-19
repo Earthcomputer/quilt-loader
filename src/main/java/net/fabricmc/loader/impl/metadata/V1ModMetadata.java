@@ -34,13 +34,15 @@ import net.fabricmc.loader.api.metadata.CustomValue;
 import net.fabricmc.loader.api.metadata.ModDependency;
 import net.fabricmc.loader.api.metadata.ModEnvironment;
 import net.fabricmc.loader.api.metadata.Person;
+import net.fabricmc.loader.impl.util.log.Log;
+import net.fabricmc.loader.impl.util.log.LogCategory;
 
 final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetadata {
 	static final IconEntry NO_ICON = size -> Optional.empty();
 
 	// Required values
 	private final String id;
-	private final Version version;
+	private Version version;
 
 	// Optional (id provides)
 	private final Collection<String> provides;
@@ -54,15 +56,9 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 	private final String accessWidener;
 
 	// Optional (dependency resolution)
-	private final Map<String, ModDependency> depends;
-	private final Map<String, ModDependency> recommends;
-	private final Map<String, ModDependency> suggests;
-	private final Map<String, ModDependency> conflicts;
-	private final Map<String, ModDependency> breaks;
-
+	private final Collection<ModDependency> dependencies;
 	// Happy little accidents
-	@Deprecated
-	private final Map<String, ModDependency> requires;
+	private final boolean hasRequires;
 
 	// Optional (metadata)
 	@Nullable
@@ -80,7 +76,14 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 	// Optional (custom values)
 	private final Map<String, CustomValue> customValues;
 
-	V1ModMetadata(String id, Version version, Collection<String> provides, ModEnvironment environment, Map<String, List<EntrypointMetadata>> entrypoints, Collection<NestedJarEntry> jars, Collection<MixinEntry> mixins, @Nullable String accessWidener, Map<String, ModDependency> depends, Map<String, ModDependency> recommends, Map<String, ModDependency> suggests, Map<String, ModDependency> conflicts, Map<String, ModDependency> breaks, Map<String, ModDependency> requires, /* @Nullable */ String name, @Nullable String description, Collection<Person> authors, Collection<Person> contributors, @Nullable ContactInformation contact, Collection<String> license, IconEntry icon, Map<String, String> languageAdapters, Map<String, CustomValue> customValues) {
+	V1ModMetadata(String id, Version version, Collection<String> provides,
+			ModEnvironment environment, Map<String, List<EntrypointMetadata>> entrypoints, Collection<NestedJarEntry> jars,
+			Collection<MixinEntry> mixins, @Nullable String accessWidener,
+			Collection<ModDependency> dependencies, boolean hasRequires,
+			/* @Nullable */ String name, @Nullable String description,
+			Collection<Person> authors, Collection<Person> contributors, @Nullable ContactInformation contact, Collection<String> license, IconEntry icon,
+			Map<String, String> languageAdapters,
+			Map<String, CustomValue> customValues) {
 		this.id = id;
 		this.version = version;
 		this.provides = Collections.unmodifiableCollection(provides);
@@ -89,12 +92,8 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 		this.jars = Collections.unmodifiableCollection(jars);
 		this.mixins = Collections.unmodifiableCollection(mixins);
 		this.accessWidener = accessWidener;
-		this.depends = DependencyOverrides.INSTANCE.getActiveDependencyMap("depends", id, Collections.unmodifiableMap(depends));
-		this.recommends = DependencyOverrides.INSTANCE.getActiveDependencyMap("recommends", id, Collections.unmodifiableMap(recommends));
-		this.suggests = DependencyOverrides.INSTANCE.getActiveDependencyMap("suggests", id, Collections.unmodifiableMap(suggests));
-		this.conflicts = DependencyOverrides.INSTANCE.getActiveDependencyMap("conflicts", id, Collections.unmodifiableMap(conflicts));
-		this.breaks = DependencyOverrides.INSTANCE.getActiveDependencyMap("breaks", id, Collections.unmodifiableMap(breaks));
-		this.requires = Collections.unmodifiableMap(requires);
+		this.dependencies = Collections.unmodifiableCollection(DependencyOverrides.INSTANCE.apply(id, dependencies));
+		this.hasRequires = hasRequires;
 		this.name = name;
 
 		// Empty description if not specified
@@ -132,7 +131,7 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 
 	@Override
 	public String getType() {
-		return "fabric"; // Fabric Mod
+		return TYPE_FABRIC_MOD; // Fabric Mod
 	}
 
 	@Override
@@ -151,6 +150,11 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 	}
 
 	@Override
+	public void setVersion(Version version) {
+		this.version = version;
+	}
+
+	@Override
 	public ModEnvironment getEnvironment() {
 		return this.environment;
 	}
@@ -161,28 +165,8 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 	}
 
 	@Override
-	public Collection<ModDependency> getDepends() {
-		return this.depends.values();
-	}
-
-	@Override
-	public Collection<ModDependency> getRecommends() {
-		return this.recommends.values();
-	}
-
-	@Override
-	public Collection<ModDependency> getSuggests() {
-		return this.suggests.values();
-	}
-
-	@Override
-	public Collection<ModDependency> getConflicts() {
-		return this.conflicts.values();
-	}
-
-	@Override
-	public Collection<ModDependency> getBreaks() {
-		return this.breaks.values();
+	public Collection<ModDependency> getDependencies() {
+		return dependencies;
 	}
 
 	// General metadata
@@ -288,12 +272,12 @@ final class V1ModMetadata extends AbstractModMetadata implements LoaderModMetada
 	}
 
 	@Override
-	public void emitFormatWarnings(Logger logger) {
+	public void emitFormatWarnings() {
 		if (getSchemaVersion() < FabricModMetadataReader.LATEST_VERSION) {
 			logger.warn("Mod ID " + getId() + " uses outdated schema version: " + getSchemaVersion() + " < " + FabricModMetadataReader.LATEST_VERSION);
 		}
-		if (!this.requires.isEmpty()) {
-			logger.warn("Mod `{}` ({}) uses 'requires' key in fabric.mod.json, which is not supported - use 'depends'", this.id, this.version);
+		if (hasRequires) {
+			logger.warn(LogCategory.METADATA, "Mod `%s` (%s) uses 'requires' key in fabric.mod.json, which is not supported - use 'depends'", this.id, this.version);
 		}
 	}
 
