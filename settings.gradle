@@ -8,11 +8,11 @@ pluginManagement {
 	}
 }
 
-include("minecraft-test")
+//include("minecraft-test")
 
 rootProject.name = "quilt-loader"
 
-include "minecraft"
+//include "minecraft"
 
 if (JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_16)) {
 	include "minecraft:minecraft-test"

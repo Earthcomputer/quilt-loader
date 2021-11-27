@@ -15,8 +15,7 @@ plugins {
 	id 'com.github.johnrengelman.shadow' version '7.0.0'
 }
 
-sourceCompatibility = 1.8
-targetCompatibility = 1.8
+def javaVersion = JavaVersion.VERSION_1_8
 
 archivesBaseName = "quilt-loader"
 
@@ -212,12 +211,6 @@ javadoc {
 	failOnError = false
 }
 
-task javadocJar(type: Jar) {
-	dependsOn javadoc
-	from javadoc.destinationDir
-	archiveClassifier = 'javadoc'
-}
-
 build.dependsOn javadocJar
 
 allprojects {
@@ -245,17 +238,17 @@ publishing {
 		mavenJava(MavenPublication) {
 			// add all the jars that should be included when publishing to maven
 			artifact(file("${project.buildDir}/libs/$archivesBaseName-${version}.jar")) {
-				builtBy remapJar
+				builtBy jar
 			}
 			artifact(sourcesJar) {
-				builtBy remapSourcesJar
+				builtBy sourcesJar
 			}
 			artifact javadocJar
 			artifact(file('src/main/resources/quilt-installer.json')) {
-				builtBy remapJar
+				builtBy jar
 			}
 			artifact(file('src/main/resources/quilt-installer.launchwrapper.json')) {
-				builtBy remapJar
+				builtBy jar
 				classifier = "launchwrapper"
 			}
 		}
@@ -346,5 +339,3 @@ class RefreshMetaTask extends DefaultTask {
 	}
 }
 
-publish.mustRunAfter checkVersion
-github.mustRunAfter checkVersion
